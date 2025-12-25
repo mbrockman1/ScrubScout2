@@ -1,0 +1,7 @@
+{
+  "name": "ScrubScout",
+  "description": "ScrubScout is a community-driven platform for healthcare travel professionals to discover, review, and rate hospitals and facilities, featuring verified professional contributions and legal transparency.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

@@ -1,0 +1,52 @@
+# --- OS & General ---
+.DS_Store
+Thumbs.db
+*.log
+
+# --- IDEs ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- DATASETS (Important!) ---
+# Ignore the heavy PTB-XL data folders so you don't crash GitHub
+ecg_data/
+cxr_data/
+code/ecg_data/
+records100/
+records500/
+*.dat
+*.hea
+*.npy
+
+# Note: If you want to commit specific small CSVs (like scp_statements.csv), 
+# you can force add them using: git add -f filename.csv
+
+# --- PYTHON / BACKEND ---
+__pycache__/
+*.py[cod]
+*$py.class
+# Virtual Environments
+venv/
+.venv/
+env/
+# Environment variables
+.env
+.env.*
+
+# --- NODE / FRONTEND ---
+node_modules/
+# Build outputs
+dist/
+build/
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+# Vite specific
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
