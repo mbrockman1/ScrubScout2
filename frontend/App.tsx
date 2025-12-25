@@ -9,21 +9,42 @@ import Profile from './pages/Profile';
 import Moderation from './pages/Moderation';
 import Legal from './pages/Legal';
 import { User, Facility, Review, UserRole } from './types';
-import { MOCK_FACILITIES, MOCK_REVIEWS } from './constants';
+import { api } from './services/api';
 
 const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<string>('home');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [facilities, setFacilities] = useState<Facility[]>(MOCK_FACILITIES);
-  const [reviews, setReviews] = useState<Review[]>(MOCK_REVIEWS);
+  const [facilities, setFacilities] = useState<Facility[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string | null>(null);
 
-  // Persistence simulation for the User Registry
+  // Persistence simulation for the User Registry (Kept for MVP Mock Auth)
   const [userRegistry, setUserRegistry] = useState<User[]>([]);
 
+  // INITIAL DATA FETCH
   useEffect(() => {
+    const initApp = async () => {
+      setIsLoading(true);
+      try {
+        const [fetchedFacilities, fetchedReviews] = await Promise.all([
+          api.getFacilities(),
+          api.getReviews()
+        ]);
+        setFacilities(fetchedFacilities);
+        setReviews(fetchedReviews);
+      } catch (error) {
+        console.error("Failed to load data", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    initApp();
+
+    // Load LocalStorage Auth
     const savedRegistry = localStorage.getItem('scrubscout_registry');
     if (savedRegistry) {
       setUserRegistry(JSON.parse(savedRegistry));
@@ -44,7 +65,9 @@ const App: React.FC = () => {
     if (savedUser) setCurrentUser(JSON.parse(savedUser));
   }, []);
 
-  const handleSignup = (email: string) => {
+  const handleSignup = async (email: string) => {
+    await api.signup(email); // Service call
+    
     if (userRegistry.find(u => u.email === email)) {
       alert("This email is already registered.");
       setCurrentPage('auth');
@@ -79,6 +102,7 @@ const App: React.FC = () => {
   };
 
   const handleLogin = (email: string, role: UserRole): User | null => {
+    // In a real app, this would be await api.login(email, password)
     const user = userRegistry.find(u => u.email === email);
     if (user) {
       if (!user.isVerified) {
@@ -120,8 +144,8 @@ const App: React.FC = () => {
     setCurrentPage('detail');
   };
 
-  const handleAddReview = (newReview: Partial<Review>) => {
-    const review: Review = {
+  const handleAddReview = async (newReview: Partial<Review>) => {
+    const reviewPayload: Review = {
       id: Math.random().toString(36).substr(2, 9),
       facilityId: newReview.facilityId!,
       userId: newReview.userId!,
@@ -129,12 +153,16 @@ const App: React.FC = () => {
       rating: newReview.rating!,
       title: newReview.title!,
       content: newReview.content!,
-      status: 'APPROVED', // Defaulting to approved for MVP
+      status: 'APPROVED', 
       createdAt: new Date().toISOString(),
       helpfulVotes: 0
     };
-    setReviews(prev => [review, ...prev]);
-    updateFacilityRating(review.facilityId, review.rating);
+
+    // Use API Service
+    const savedReview = await api.submitReview(reviewPayload);
+    
+    setReviews(prev => [savedReview, ...prev]);
+    updateFacilityRating(savedReview.facilityId, savedReview.rating);
   };
 
   const updateFacilityRating = (facilityId: string, rating: number) => {
@@ -168,6 +196,17 @@ const App: React.FC = () => {
   const handleRejectReview = (id: string) => {
     setReviews(prev => prev.map(r => r.id === id ? { ...r, status: 'REJECTED', isReported: false } : r));
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center">
+          <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
+          <p className="text-slate-400 font-black uppercase tracking-widest text-xs">Loading ScrubScout...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
