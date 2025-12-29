@@ -25,7 +25,7 @@ const Search: React.FC<SearchProps> = ({ facilities, initialQuery = '', onFacili
                              f.address.toLowerCase().includes(q) ||
                              f.city.toLowerCase().includes(q) ||
                              f.state.toLowerCase().includes(q) ||
-                             f.tags.some(t => t.toLowerCase().includes(q));
+                             f.tags?.some(t => t.toLowerCase().includes(q));
         
         const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(f.category);
         const matchesTags = selectedTags.length === 0 || selectedTags.every(t => f.tags.includes(t));

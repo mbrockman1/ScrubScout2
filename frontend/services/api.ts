@@ -1,73 +1,104 @@
+export interface Hospital {
+  id: string;
+  name: string;
+  address: string;
+  city: string;
+  state: string;
+  zip_code: string;
+  phone_number?: string;
+  hospital_type?: string;
+  rating?: string;
+  latitude?: number;
+  longitude?: number;
+}
 
-import { Facility, Review, User, UserRole } from '../types';
-import { MOCK_FACILITIES, MOCK_REVIEWS } from '../constants';
+export interface Review {
+  facility_id: string;
+  rating: number;
+  content: string;
+  author?: string;
+}
 
-// TOGGLE THIS TO TRUE TO USE THE REAL PYTHON BACKEND
-const USE_REAL_API = true; 
-// const API_BASE_URL = "http://localhost:8000";
 const API_BASE_URL = "http://localhost:8000/api";
 
-// Simulated async delay
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
 export const api = {
-  // --- Facilities ---
-  async getFacilities(): Promise<Facility[]> {
-    if (USE_REAL_API) {
-      const res = await fetch('/api/facilities');
-      return res.json();
+  // Fetch all hospitals and normalize data names
+  getHospitals: async (): Promise<Hospital[]> => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/facilities`);
+      if (!response.ok) throw new Error('Network response was not ok');
+      const data = await response.json();
+      
+      // Map Backend (Excel) keys to Frontend keys
+      return data.map((h: any) => ({
+        ...h,
+        id: h.provider_id || h.id,
+        name: h.hospital_name || h.name,
+        rating: h.hospital_overall_rating || h.rating
+      }));
+    } catch (error) {
+      console.error("Error fetching hospitals:", error);
+      return [];
     }
-    await delay(600); // Simulate network latency
-    return [...MOCK_FACILITIES];
   },
 
-  // --- Reviews ---
-  async getReviews(facilityId?: string): Promise<Review[]> {
-    if (USE_REAL_API) {
+  // Fetch reviews
+  getReviews: async (facilityId?: string): Promise<Review[]> => {
+    try {
       const url = facilityId 
-        ? `/api/facilities/${facilityId}/reviews`
-        : '/api/reviews';
-      const res = await fetch(url);
-      return res.json();
+        ? `${API_BASE_URL}/facilities/${facilityId}/reviews` 
+        : `${API_BASE_URL}/reviews`;
+      const response = await fetch(url);
+      return await response.json();
+    } catch (error) {
+      console.error("Error fetching reviews:", error);
+      return [];
     }
-    await delay(400);
-    // Return all or filter by ID
-    if (facilityId) {
-      return MOCK_REVIEWS.filter(r => r.facilityId === facilityId);
-    }
-    return [...MOCK_REVIEWS];
   },
 
-  async submitReview(review: Review): Promise<Review> {
-    if (USE_REAL_API) {
-      const res = await fetch('/api/reviews', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(review),
-      });
-      return res.json();
-    }
-    await delay(800);
-    return review;
-  },
+  getFacilities: async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/facilities`);
+    if (!response.ok) throw new Error("Backend not responding");
+    const data = await response.json();
+    
+    // Transform the Backend data into exactly what your Search/Map components expect
+    return data.map((f: any) => ({
+      ...f,
+      id: f.provider_id || f.id,
+      name: f.hospital_name || f.name,
+      // Ensure numbers are actually numbers
+      rating: f.hospital_overall_rating ? parseFloat(f.hospital_overall_rating) : 0,
+      reviewCount: f.reviewCount || 0,
+      // Ensure coordinates exist even if blank in Excel (to prevent Map crash)
+      latitude: f.latitude || null,
+      longitude: f.longitude || null
+    }));
+  } catch (error) {
+    console.error("Fetch error:", error);
+    return [];
+  }
+},
 
-  // --- Auth (Simulated for MVP) ---
-  async login(email: string, role: UserRole): Promise<User | null> {
-    // Ideally this hits POST /api/auth/login
-    await delay(500);
-    
-    // We keep the localStorage logic from App.tsx here for the "Mock" version
-    // to ensure the preview environment works as expected.
-    const savedRegistry = localStorage.getItem('scrubscout_registry');
-    let registry: User[] = savedRegistry ? JSON.parse(savedRegistry) : [];
-    
-    const user = registry.find(u => u.email === email);
-    return user || null;
+  submitReview: async (review: any) => {
+    const response = await fetch(`${API_BASE_URL}/reviews`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(review),
+    });
+    return await response.json();
   },
   
-  async signup(email: string): Promise<void> {
-    await delay(500);
-    // Logic remains handled by App.tsx state for the Mock version
-    // In real version: await fetch('/api/auth/signup', ...)
+  signup: async (email: string) => {
+    return { success: true };
+  },
+
+  // Post a new review
+  addReview: async (review: Review): Promise<void> => {
+    await fetch(`${API_BASE_URL}/reviews`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(review),
+    });
   }
 };
