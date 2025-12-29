@@ -2,13 +2,26 @@ import os
 import pandas as pd
 from contextlib import asynccontextmanager
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ConfigDict
+
+from sqlalchemy.orm import Session
+import models, schemas
+from database import SessionLocal, engine
+
+models.Base.metadata.create_all(bind=engine)
 
 # 1. STORAGE
 verified_facilities: List["Facility"] = []
 reviews_db: List["Review"] = []
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 # 2. LIFESPAN
 @asynccontextmanager
@@ -120,9 +133,12 @@ async def root():
 async def health():
     return {"hospitals": len(verified_facilities), "reviews": len(reviews_db)}
 
-@app.get("/api/facilities", response_model=List[Facility])
-async def get_facilities():
-    return verified_facilities
+@app.get("/api/facilities", response_model=List[schemas.Facility])
+def get_facilities(state: str = None, db: Session = Depends(get_db)):
+    query = db.query(models.Facility)
+    if state:
+        query = query.filter(models.Facility.state == state)
+    return query.all()
 
 @app.get("/api/hospitals", response_model=List[Facility])
 async def get_hospitals_alias():
@@ -136,6 +152,32 @@ async def get_reviews():
 async def add_review(review: Review):
     reviews_db.append(review)
     return review
+
+@app.get("/api/facilities")
+def read_facilities(state: str = None, db: Session = Depends(get_db)):
+    query = db.query(models.Facility)
+    if state:
+        query = query.filter(models.Facility.state == state)
+    return query.all()
+
+@app.post("/api/reviews", response_model=schemas.Review)
+def create_review(review: schemas.ReviewCreate, db: Session = Depends(get_db)):
+    # Check if facility exists first
+    facility = db.query(models.Facility).filter(models.Facility.id == review.facility_id).first()
+    if not facility:
+        raise HTTPException(status_code=404, detail="Facility not found")
+
+    # Create review using the validated data
+    db_review = models.Review(**review.model_dump())
+    
+    db.add(db_review)
+    db.commit()
+    db.refresh(db_review)
+    return db_review
+
+@app.get("/api/admin/pending", response_model=List[schemas.Review])
+def get_pending_reviews(db: Session = Depends(get_db)):
+    return db.query(models.Review).filter(models.Review.is_approved == False).all()
 
 if __name__ == "__main__":
     import uvicorn

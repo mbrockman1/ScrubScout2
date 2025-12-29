@@ -39,14 +39,21 @@ export const api = {
     } catch (error) { return []; }
   },
 
-  submitReview: async (review: any) => {
+submitReview: async (review: any) => {
+    console.log("Submitting Review Data:", review); // ADD THIS LINE
     const response = await fetch(`${API_BASE_URL}/reviews`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(review),
     });
+    
+    if (!response.ok) {
+        const errorData = await response.json();
+        console.error("Server 422 Error Detail:", errorData); // THIS WILL TELL US THE FIELD
+        throw new Error('Review submission failed');
+    }
     return await response.json();
-  },
+},
 
   signup: async (email: string) => ({ success: true })
 };
