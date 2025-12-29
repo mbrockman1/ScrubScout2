@@ -33,8 +33,9 @@ async def lifespan(app: FastAPI):
                 'facility_id': 'provider_id',
                 'facility_name': 'hospital_name',
                 'city_town': 'city',
-                'telephone_number': 'phone_number' # ADD THIS LINE
+                'telephone_number': 'phone_number'
             }
+            df = df.rename(columns=mapping)
             
             # Find ID column
             for col in ['facility_id', 'provider_id', 'hospital_id']:
