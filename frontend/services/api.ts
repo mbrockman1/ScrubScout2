@@ -3,7 +3,9 @@ import { Facility, Review, User, UserRole } from '../types';
 import { MOCK_FACILITIES, MOCK_REVIEWS } from '../constants';
 
 // TOGGLE THIS TO TRUE TO USE THE REAL PYTHON BACKEND
-const USE_REAL_API = false; 
+const USE_REAL_API = true; 
+// const API_BASE_URL = "http://localhost:8000";
+const API_BASE_URL = "http://localhost:8000/api";
 
 // Simulated async delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));

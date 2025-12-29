@@ -1,134 +1,136 @@
 import os
-import httpx
+import pandas as pd
+from contextlib import asynccontextmanager
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from dotenv import load_dotenv
-import google.generativeai as genai
+from pydantic import BaseModel, Field, ConfigDict
 
-# Load environment variables
-load_dotenv()
+# 1. STORAGE
+verified_facilities: List["Facility"] = []
+reviews_db: List["Review"] = []
 
-app = FastAPI(title="ScrubScout Backend", version="2.0.0")
+# 2. LIFESPAN
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global verified_facilities
+    print("\n--- SCRUBSCOUT STARTUP ---")
+    file_path = "hospital.xlsx"
+    
+    if os.path.exists(file_path):
+        try:
+            df = pd.read_excel(file_path)
+            
+            # Clean names: lowercase, strip whitespace, replace spaces with underscores
+            df.columns = [c.lower().strip().replace(' ', '_').replace('/', '_') for c in df.columns]
+            
+            # DEBUG: This will show us exactly what columns Python sees
+            print(f"DEBUG: Found columns: {df.columns.tolist()}")
+            
+            # --- UPDATED SMART MAPPING ---
+            # We look for common variations and rename them to match the model
+            mapping = {}
+            
+            # Find ID column
+            for col in ['facility_id', 'provider_id', 'hospital_id']:
+                if col in df.columns: mapping[col] = 'provider_id'
+            
+            # Find Name column
+            for col in ['facility_name', 'hospital_name', 'name']:
+                if col in df.columns: mapping[col] = 'hospital_name'
+                
+            # Find City column (Handles 'city', 'city_town', 'town', etc)
+            for col in ['city', 'city_town', 'town', 'city_state']:
+                if col in df.columns: mapping[col] = 'city'
 
-# 1. CORS Support
-# Configure this to match your frontend URL (e.g., http://localhost:5173)
+            df = df.rename(columns=mapping)
+            
+            # Force types to prevent Pydantic crashes
+            if 'zip_code' in df.columns:
+                df['zip_code'] = df['zip_code'].astype(str)
+            if 'provider_id' in df.columns:
+                df['provider_id'] = df['provider_id'].astype(str)
+                
+            # Handle empty cells
+            df = df.where(pd.notnull(df), None)
+            
+            data = df.to_dict(orient="records")
+            verified_facilities = [Facility(**item) for item in data]
+            print(f"✅ SUCCESS: Loaded {len(verified_facilities)} hospitals.")
+            
+        except Exception as e:
+            print(f"❌ DATA ERROR: {e}")
+            # Optional: print the first row of data to see what it looks like
+            if 'df' in locals():
+                print(f"SAMPLE ROW: {df.iloc[0].to_dict() if not df.empty else 'Empty'}")
+    else:
+        print(f"⚠️ FILE NOT FOUND: {file_path}")
+    
+    yield
+    print("--- SCRUBSCOUT SHUTDOWN ---")
+
+# 3. INITIALIZATION
+app = FastAPI(title="ScrubScout Backend", version="3.2.0", lifespan=lifespan)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For production, replace with specific origins
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 2. Data Models (Pydantic)
+# 4. MODELS (Added Optional to City just in case)
 class Facility(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    
     id: str = Field(..., alias="provider_id")
     name: str = Field(..., alias="hospital_name")
     address: str
-    city: str
+    city: str = "Unknown"
     state: str
     zip_code: str = Field(..., alias="zip_code")
     phone_number: Optional[str] = None
     hospital_type: Optional[str] = None
     rating: Optional[str] = Field(None, alias="hospital_overall_rating")
+    # ADD THESE TWO LINES:
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
-    class Config:
-        populate_by_name = True
+  
 
-class ModerateRequest(BaseModel):
+class Review(BaseModel):
+    facility_id: str
+    rating: int
     content: str
-    parameters: Optional[dict] = {}
+    author: Optional[str] = "Anonymous"
 
-# In-memory storage for demonstration (Replace with DB for production)
-verified_facilities: List[Facility] = []
-
-# CMS API Configuration
-CMS_DATASET_ID = "xubh-q36u"  # Hospital General Information ID
-CMS_API_URL = f"https://data.cms.gov/provider-data/api/1/datastore/query/{CMS_DATASET_ID}/0"
-
-# Gemini API Configuration
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-
-# 3. Endpoints
+# 5. ENDPOINTS
+@app.get("/")
+async def root():
+    return {"message": "ScrubScout API v3.2.0"}
 
 @app.get("/api/health")
-async def health_check():
-    """Verifies the service is running."""
-    return {"status": "ok", "service": "ScrubScout API"}
+async def health():
+    return {"hospitals": len(verified_facilities), "reviews": len(reviews_db)}
 
 @app.get("/api/facilities", response_model=List[Facility])
 async def get_facilities():
-    """Serves the verified hospital data."""
-    if not verified_facilities:
-        return []
     return verified_facilities
 
-@app.post("/api/admin/sync-cms")
-async def sync_cms_data():
-    """Connects to data.cms.gov to ingest official provider datasets."""
-    global verified_facilities
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(CMS_API_URL)
-            response.raise_for_status()
-            raw_data = response.json()
-            
-            # The CMS API returns results in a 'results' key
-            items = raw_data.get("results", [])
-            
-            # Map CMS data to our Facility model
-            new_facilities = []
-            for item in items:
-                try:
-                    # Filter/Map data to match Facility model
-                    facility = Facility(
-                        provider_id=item.get("provider_id", ""),
-                        hospital_name=item.get("hospital_name", ""),
-                        address=item.get("address", ""),
-                        city=item.get("city", ""),
-                        state=item.get("state", ""),
-                        zip_code=item.get("zip_code", ""),
-                        phone_number=item.get("phone_number"),
-                        hospital_type=item.get("hospital_type"),
-                        hospital_overall_rating=item.get("hospital_overall_rating")
-                    )
-                    new_facilities.append(facility)
-                except Exception as e:
-                    print(f"Skipping record due to validation error: {e}")
-                    continue
-            
-            verified_facilities = new_facilities
-            return {"message": f"Successfully synced {len(verified_facilities)} facilities from CMS."}
-            
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch data from CMS: {str(e)}")
+@app.get("/api/hospitals", response_model=List[Facility])
+async def get_hospitals_alias():
+    return verified_facilities
 
-@app.post("/api/moderate")
-async def moderate_content(request: ModerateRequest):
-    """
-    Secure proxy for Gemini API to prevent exposing keys on the client side.
-    Performs content analysis/moderation on facility reviews or data.
-    """
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=500, detail="Gemini API Key not configured on server.")
+@app.get("/api/reviews")
+async def get_reviews():
+    return reviews_db
 
-    try:
-        model = genai.GenerativeModel('gemini-pro')
-        # Custom prompt for moderation or analysis
-        prompt = f"Analyze the following medical facility feedback for professionalism and accuracy: {request.content}"
-        
-        response = model.generate_content(prompt)
-        return {
-            "analysis": response.text,
-            "status": "moderated"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gemini API Error: {str(e)}")
+@app.post("/api/reviews")
+async def add_review(review: Review):
+    reviews_db.append(review)
+    return review
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
